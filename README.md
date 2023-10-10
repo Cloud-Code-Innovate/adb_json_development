@@ -1,508 +1,557 @@
-# Cloud Coaching:  Oracle Autonomous Database Features for Supporting Application Development Across Cloud Services
+# Cloud Coaching:  Extracting value and managing the lifecycle of JSON data with Oracle Cloud Infrastructure
 
-Derrick Cameron, Steve Nichols
-July, 2023
+Derrick Cameron, Wilson Randle
+October, 2023
 
-## **Related Recordings**
 
-- [DBMS_CLOUD Package](https://www.youtube.com/watch?v=RvIPCXiz_vE)
-- [ORDS Install and Config](https://www.youtube.com/watch?v=RvIPCXiz_vE)
-- [Autonomous Database for Legacy Database Developers](https://www.youtube.com/watch?v=EbrG4-K-TzY)
-
-## **Export Data to Object Storage in csv Format and Query Data in Object Storage** 
+## **SQL Queries** 
 
 ```
 <copy>
--- list objects in object storage bucket
-SELECT * FROM DBMS_CLOUD.LIST_OBJECTS('API_TOKEN', '<object storage bucket URL>');
+alter table products_collection add constraint required_fields 
+check (JSON_EXISTS(DATA, '$?(@.title.type() == "string" && @.price.number() > 0)'));
 
--- export table data to object storage bucket
-BEGIN
-  DBMS_CLOUD.EXPORT_DATA(
-    credential_name => 'API_TOKEN',
-    file_uri_list   => '<object storage bucket URL>/o/sales.csv',
-    query           => 'SELECT 777 project_id, sysdate shapshot_date, s.* FROM sales s',
-    format          => JSON_OBJECT('type' value 'csv', 'delimiter' value ',','maxfilesize' value 999999999,'header' value true)    
-    );
-END;
-/
+select JSON_Serialize(DATA) from products_collection where rownum < 10;
+select JSON_Serialize(DATA returning varchar2 pretty) from products_collection where rownum < 10;
 
--- sample delete object code
-begin
-dbms_cloud.delete_object(
-    credential_name => 'API_TOKEN',
-    object_uri => '<object storage bucket URL>/o/sales_1_20230706T221507652863Z.csv');
-end;
-/
 
--- create external_table on top of sales files
-begin
-dbms_cloud.create_external_table (
-table_name => 'sales_ext',
-credential_name => 'api_token',
-file_uri_list => '<object storage bucket url>/o/sales_1_*.csv',
-format => json_object('delimiter' value ',','type' value 'csv', 'skipheaders' value '1','logretention' value 2),
-column_list => 'project_id number,
-    snapshot_date date,
-    prod_id number,
-    cust_id number,
-    time_id date,
-    channel_id number,
-    promo_id number,
-    quantity_sold number,
-    amount_sold number(20,2),
-    employee_id number');
-end;
-/
+-- dot notation
+select JSON_Serialize(DATA)
+from products_collection p
+where p.DATA.type.string() = 'movie'
+and p.DATA.format.string() = 'DVD'
+and p.DATA.price.number() > 5;
+
+select p.DATA.title.string(), p.DATA.year.number()
+from products_collection p
+where p.DATA.type.string() = 'movie'
+order by 2 DESC;
+
+-- aggregation
+select p.DATA.decade.string(),
+       round(avg(p.DATA.price.number()),2)
+from products_collection p
+where p.DATA.type.string() = 'movie'
+group by p.DATA.decade.string();
+
+-- view created in JSON Console
+create or replace view product_collection_view as
+SELECT
+        D.ID,
+        D.TYPE,
+        D.TITLE,
+        D.FORMAT1,
+        D.CONDITION,
+        D.PRICE,
+        D.COMMENT_1,
+        D.YEAR,
+        D.DECADE,
+        D.FORMAT2
+    FROM
+        PRODUCTS_COLLECTION CT,
+        JSON_TABLE ( CT.DATA, '$'
+                COLUMNS (
+                    ID NUMBER PATH '$."_id"',
+                    TYPE VARCHAR2 ( 100 CHAR ) PATH '$."type"',
+                    TITLE VARCHAR2 ( 100 CHAR ) PATH '$."title"',
+                    FORMAT1 VARCHAR2 ( 100 CHAR ) PATH '$."format"',
+                    CONDITION VARCHAR2 ( 100 CHAR ) PATH '$."condition"',
+                    PRICE NUMBER PATH '$."price"',
+                    COMMENT_1 VARCHAR2 ( 100 CHAR ) PATH '$."comment"',
+                    YEAR NUMBER PATH '$."year"',
+                    DECADE VARCHAR2 ( 100 CHAR ) PATH '$."decade"',
+                    FORMAT2 VARCHAR2 ( 100 CHAR ) PATH '$." format "'
+                )
+            )
+        D;
+
 </copy>
 ```
 
-## **Process Parquet Files in Object Storage**
+## **Loading Data**
 
-[**Blog on this topic**](https://blogs.oracle.com/datawarehousing/post/oracle-autonomous-data-warehouse-access-parquet-files-in-object-stores)
-
-The point of this exercise is to show:
-- Parquet files are easier to work with since the table structure is embedded in the file.
-- Parquet files are in compressed binary format and are smaller and more efficient to query than csv.
-- Querying individual columns in parquet files reduces IO compared with csv files, which scan the entire file even when only a single column is retrieved.
-
-
-```
-<copy>
-- Install parq using snap - A tool for exploring parquet files
-
-- view file definition using parq (metadata and data are part of parquet files)
-parq schema sales_extended.parquet
-
--- output
-Column Name     Data Type  
-Prod_id         int32      
-Cust_id         int32      
-Time_id         string     
-Channel_id      int32      
-Promo_id        int32      
-Quantity_sold   int32      
-Amount_sold     string     
-Gender          string     
-City            string     
-State_province  string     
-Income_level    string     
-
--- view first few rows of parquet file
-parq head sales_extended.parquet 
-
--- output
-   Prod_id  Cust_id  Time_id     Channel_id  Promo_id  Quantity_sold  Amount_sold  Gender  City              State_province         Income_level          
-0  13       987      1998-01-10  3           999       1              �P        M       Adelaide          South Australia        K: 250,000 - 299,999  
-1  13       1660     1998-01-10  3           999       1              �P        M       Dolores           CO                     L: 300,000 and above  
-2  13       1762     1998-01-10  3           999       1              �P        M       Cayuga            ND                     F: 110,000 - 129,999  
-3  13       1843     1998-01-10  3           999       1              �P        F       Bergen op Zoom    Noord-Brabant          C: 50,000 - 69,999    
-4  13       1948     1998-01-10  3           999       1              �P        F       Neuss             Nordrhein-Westfalen    J: 190,000 - 249,999  
-5  13       2273     1998-01-10  3           999       1              �P        F       Darwin            Northern Territory     F: 110,000 - 129,999  
-6  13       2380     1998-01-10  3           999       1              �P        M       Sabadell          Barcelona              K: 250,000 - 299,999  
-7  13       2683     1998-01-10  3           999       1              �P        F       Orangeville       IL                     C: 50,000 - 69,999    
-8  13       2865     1998-01-10  3           999       1              �P        M       Gennevilliers     Ile-de-France          D: 70,000 - 89,999    
-9  13       4663     1998-01-10  3           999       1              �P        F       Henley-on-Thames  England - Oxfordshire  A: Below 30,000
-
--- create external table from parquet file.  Note that no specification of the column formats are required.
-begin
-    dbms_cloud.create_external_table (
-       table_name =>'sales_extended_parquet_ext',
-       credential_name =>'API_TOKEN',
-       file_uri_list =>'<object storage bucket URL>/o/sales_extended.parquet',
-       format =>  '{"type":"parquet",  "schema": "first"}'
-    );
-end;
-/
-
--- create table in database
-CREATE TABLE SALES_EXTENDED
-   (  PROD_ID NUMBER, 
-  CUST_ID NUMBER, 
-  TIME_ID VARCHAR2(30), 
-  CHANNEL_ID NUMBER, 
-  PROMO_ID NUMBER, 
-  QUANTITY_SOLD NUMBER(10,0), 
-  AMOUNT_SOLD NUMBER(10,2), 
-  GENDER VARCHAR2(1), 
-  CITY VARCHAR2(30), 
-  STATE_PROVINCE VARCHAR2(40), 
-  INCOME_LEVEL VARCHAR2(30)
-   );
-   
--- copy data from parquet file to Oracle table
-begin
- dbms_cloud.copy_data(
-    table_name => 'SALES_EXTENDED',
-    credential_name =>'API_TOKEN',
-    file_uri_list =>'<object storage bucket URL/o/sales_extended.parquet',
-    format =>  '{"type":"parquet",  "schema": "first"}'
- );
- end;
- /
-
- -- create copy of sales data in object storage to show how much larger csv (63mb) versus parquet (8mb)
-BEGIN
-  DBMS_CLOUD.EXPORT_DATA(
-    credential_name => 'API_TOKEN',
-    file_uri_list   => '<object storage bucket URL>/o/sales_extended.csv',
-    query           => 'SELECT * FROM sales_extended s',
-    format          => JSON_OBJECT('type' value 'csv', 'delimiter' value ',','maxfilesize' value 999999999,'header' value true)    
-    );
-END;
-/
-
--- create external table on csv file in object storage to compare with parquet file (size, performance/IO)
-begin
-dbms_cloud.create_external_table (
-table_name => 'sales_extended_csv_ext',
-credential_name => 'api_token',
-file_uri_list => '<object storage bucket URL>/o/sales_extended.csv',
-format => json_object('delimiter' value ',','type' value 'csv', 'skipheaders' value '1','logretention' value 2,'rejectlimit' value 9999999,'ignoremissingcolumns' value 'true'),
-column_list => 'prod_id number,
-    cust_id number,
-    time_id varchar2(30),
-    channel_id number,
-    promo_id number,
-    quantity_sold number(10,0),
-    amount_sold number(10,2),
-    gender varchar2(100),
-    city varchar2(100),
-    state_province varchar2(100),
-    income_level varchar2(100)');
-end;
-/
-
-- Open performance hub in the ADB console, then select ASH Analytics, then view the latest sql query to view I/I prior to running this query.  Refesh this after each of the following sql statements.
-
-select count(*) from sales_extended_csv_ext;
-create table sales_test_pq1 as select /* MONITOR NO_RESULT_CACHE */ prod_id from sales_extended_csv_ext; -- 78mb
-create table sales_test_pq2 as select /* MONITOR NO_RESULT_CACHE */ * from sales_extended_csv_ext; -- 84.5mb
-create table sales_test_pq3 as select /* MONITOR NO_RESULT_CACHE */ prod_id from sales_extended_parquet_ext; -- 4.9mb
-</copy>
-```
-
-## **Cloud Links**
-
-This registers table SALES_EXTENDED in schema DEMO in database dgcadw (source database) and we will set up schema DGC in target datbase SKWNDB to access the data.
-
-```
-<copy>
--- as admin in source database
-grant execute on DBMS_CLOUD_LINK to demo; -- demo is schema
-
-BEGIN
-DBMS_CLOUD_LINK_ADMIN.GRANT_REGISTER(
-   username => 'DEMO',
-   scope    => 'MY$TENANCY');
-END;
-/
-
--- as demo in the source db, registering table SALES_EXTENDED
-BEGIN
-   DBMS_CLOUD_LINK.REGISTER(
-    schema_name => 'DEMO',
-    schema_object  => 'SALES_EXTENDED',
-    namespace   => 'DGCADW', 
-    name        => 'SALES_EXTENDED',
-    description => 'My sales_extended table in dgcadw',
-    scope       => 'MY$TENANCY' );
-END;
-/
-
--- revoke (if you wish to later)
-BEGIN
-   DBMS_CLOUD_LINK.UNREGISTER(
-    namespace      => 'DGCADW', 
-    name           => 'SALES_EXTENDED');
-END;
-/
-
--- as admin in the target skwndb this is priviledge to access registered data sets
-EXEC DBMS_CLOUD_LINK_ADMIN.GRANT_READ('DGC'); 	-- for dgc schema, also needed for admin if needbe
-
--- as dgc in the target db, find available data sets in your ADB (registered in other dbs):
-set serveroutput on
-DECLARE
-   result CLOB DEFAULT NULL;
-BEGIN
-   DBMS_CLOUD_LINK.FIND('SALES', result); -- contains word sales
-    DBMS_OUTPUT.PUT_LINE(result);
-END;
-/
-
--- output
-[{"name":"SALES_EXTENDED","namespace":"DGCADW","description":"My sales_extended table in dgcadw"}]
-PL/SQL procedure successfully completed.
-
--- query remote table through link using schema DGC in SWKWDB.
-select count(*) from dgcadw.sales_extended@cloud$link;
-
--- output
-916039
-
--- as admin in the target db view subscribed links:
-SELECT * FROM DBA_CLOUD_LINK_ACCESS;
-
--- output
-clprdtestns1	clprdtestn1	12-MAY-23 06.38.33.922941000 AM	12-MAY-23 06.38.33.922941000 AM		
-Testdsnm200	Testds200	27-MAR-23 08.35.01.917232000 PM	27-MAR-23 08.35.01.917232000 PM		
-covid19	cdc_data	27-MAR-23 08.35.11.782836000 PM	27-MAR-23 08.35.11.782836000 PM		
-dsnm1232	ds1232	30-MAY-23 12.21.43.000000000 PM	30-MAY-23 12.21.43.000000000 PM	N	
-DGCADW	SALES_EXTENDED	07-JUL-23 05.41.31.000000000 PM	07-JUL-23 05.41.31.000000000 PM	N
-
-</copy>
-
-```
-
-- Usage notes/restrictions (significant)
-
-https://docs.oracle.com/en/cloud/paas/autonomous-database/adbsa/autonomous-cloud-links.html#GUID-5CABFB6F-370D-4B9E-BC88-DB94D221CE53
-
-
-## **Persistent Pipes**
-
-```
-<copy>
-
--- as admin
-grant execute on dbms_pipe to demo;
-
--- as demo, this needs to be executed after EVERY database reboot
-BEGIN
-    DBMS_PIPE.SET_CREDENTIAL_NAME('api_token');
-    DBMS_PIPE.SET_LOCATION_URI('<object storage bucket URL>/'); 
-END;
-/
-
--- send message to file in object storage bucket.  Note has a binary format and cannot be read by a text editor.  
-DECLARE
-  l_result  integer;
-  l_prod_id integer;
-  l_cust_id integer;
-  l_time_id varchar2(30);
-  l_channel_id integer;
-  l_promo_id integer;
-  l_quantity_sold integer;
-  l_amount_sold number(9,2);
-  l_gender varchar2(1);
-  l_city varchar2(4000);
-  l_state_province varchar2(4000);
-  l_income_level varchar2(4000);
-BEGIN
-  dbms_pipe.pack_message(999); -- message1 prod_id
-  dbms_pipe.pack_message(999); -- message2 cust_id
-  dbms_pipe.pack_message('15-JUN-2023'); -- message3 time_id
-  dbms_pipe.pack_message(999); -- message4 channel_id
-  dbms_pipe.pack_message(999); -- message5 promo_id
-  dbms_pipe.pack_message(100); -- message6 quantity_sold
-  dbms_pipe.pack_message(1000.00); -- message 7 amount_sold
-  dbms_pipe.pack_message('M'); -- message8 gender
-  dbms_pipe.pack_message('Ridgefield'); -- message9 city
-  dbms_pipe.pack_message('WA'); -- message10 state
-  dbms_pipe.pack_message('0 - 100000'); -- message11 income
- 
-  l_result := dbms_pipe.send_message(
-	pipename => 'order_pipe',
-	credential_name => dbms_pipe.get_credential_name,
-	location_uri => dbms_pipe.get_location_uri);
-     
-  if l_result = 0 then
-	dbms_output.put_line('dbms_pipe sent order successfully');
-  end if;
-end;
-/
-
--- retrieve the message back into original database (after which the file is automatically deleted) and insert into a table.
-DECLARE
-  message1 integer;
-  message2 integer;
-  message3 varchar2(30);
-  message4 integer;
-  message5 integer;
-  message6 integer;
-  message7 number(9,2);
-  message8 varchar2(1);
-  message9 varchar2(4000);
-  message10 varchar2(4000);
-  message11 varchar2(4000);
-  l_result integer;
-BEGIN
-  dbms_pipe.set_credential_name('api_token');
-  dbms_pipe.set_location_uri('<object storage bucket URL>/'); 
-  l_result := dbms_pipe.receive_message (
-	pipename => 'order_pipe',
-	timeout  => dbms_pipe.maxwait,
-	credential_name => dbms_pipe.get_credential_name,
-	location_uri => dbms_pipe.get_location_uri);
-  IF l_result = 0 THEN
-	dbms_pipe.unpack_message(message1);
-        dbms_pipe.unpack_message(message2);
-        dbms_pipe.unpack_message(message3);
-        dbms_pipe.unpack_message(message4);
-        dbms_pipe.unpack_message(message5);
-        dbms_pipe.unpack_message(message6);
-        dbms_pipe.unpack_message(message7);
-        dbms_pipe.unpack_message(message8);
-	dbms_pipe.unpack_message(message9);
-	dbms_pipe.unpack_message(message10);
-	dbms_pipe.unpack_message(message11);
-    END IF;
-    insert into sales_extended (
-        prod_id,
-        cust_id,
-        time_id,
-        channel_id,
-        promo_id,
-        quantity_sold,
-        amount_sold,
-        gender,
-	city,
-	state_province,
-	income_level)
-        values (
-        message1,
-        message2,
-        message3,
-        message4,
-        message5,
-        message6,
-        message7,
-        message8,
-	message9,
-	message10,
-	message11);
-	--
-        commit;
-END;
-/
-
-----------------------
--- skwndb database
-----------------------
-
--- as admin
-grant execute on dbms_pipe to dgc;
-
--- as dgc
+-- add credential in json user - can't seem to grant api_token created by admin
 BEGIN
   DBMS_CLOUD.CREATE_CREDENTIAL(
-    credential_name => 'oci_cred',
-    username => 'dgcameron',
-    password => '<credential to access object storage buckets>'
+    credential_name => 'api_token',
+    username => '<OCI username>',
+    password => '<credential password>'
   );
 END;
 /
 
--- create pipe (same name as source)
-DECLARE
-  r_status INTEGER;
-BEGIN
-    r_status := DBMS_PIPE.CREATE_PIPE(pipename => 'ORDER_PIPE');
+select * from user_credentials
+
+-- this creates and loads the table
+BEGIN 
+  DBMS_CLOUD.COPY_COLLECTION(    
+    collection_name => 'purchase_order_collection',    
+    credential_name => 'API_TOKEN',    
+    file_uri_list => 'https://objectstorage.us-ashburn-1.oraclecloud.com/n/natdcshjumpstartprod/b/json/o/POList.json',
+    format => '{"recorddelimiter" : "0x''01''", "unpackarrays" : "TRUE", "maxdocsize" : "10240000"}'
+  );
 END;
 /
 
--- as admin verify pipe
-SELECT ownerid, name, type FROM v$db_pipes WHERE name = 'ORDER_PIPE';
+-- index everything (12.2+), prior to 12.2 a messier text index was used ctxsys
+create search index purchase_order_idx on
+  purchase_order_collection ( DATA )
+  for json;
 
--- as dgc
-BEGIN
-    DBMS_PIPE.SET_CREDENTIAL_NAME('oci_cred');
-    DBMS_PIPE.SET_LOCATION_URI('<object storage bucket URL>/'); 
-END;
-/
+-- create function based index for the requestor tag
+create index purchase_order_requestor_idx on
+  purchase_order_collection ( 
+    json_value ( 
+      DATA, '$.Requestor'    
+        error on error
+        null on empty
+    ) 
+  );
 
+select p.DATA.PONumber.string(), p.DATA.Reference.string()
+from purchase_order_collection p
+where p.DATA.PONumber.string() between '10' and '20'
 
--- Now retrieve message from a different datbase.  Re-create message on SOURCE DB and send to file in object storage bucket.
-DECLARE
-  l_result  integer;
-  l_prod_id integer;
-  l_cust_id integer;
-  l_time_id varchar2(30);
-  l_channel_id integer;
-  l_promo_id integer;
-  l_quantity_sold integer;
-  l_amount_sold number(9,2);
-  l_gender varchar2(1);
-  l_city varchar2(4000);
-  l_state_province varchar2(4000);
-  l_income_level varchar2(4000);
-BEGIN
-  dbms_pipe.pack_message(999); -- message1 prod_id
-  dbms_pipe.pack_message(999); -- message2 cust_id
-  dbms_pipe.pack_message('15-JUN-2023'); -- message3 time_id
-  dbms_pipe.pack_message(999); -- message4 channel_id
-  dbms_pipe.pack_message(999); -- message5 promo_id
-  dbms_pipe.pack_message(100); -- message6 quantity_sold
-  dbms_pipe.pack_message(1000.00); -- message 7 amount_sold
-  dbms_pipe.pack_message('M'); -- message8 gender
-  dbms_pipe.pack_message('Ridgefield'); -- message9 city
-  dbms_pipe.pack_message('WA'); -- message10 state
-  dbms_pipe.pack_message('0 - 100000'); -- message11 income
- 
-  l_result := dbms_pipe.send_message(
-	pipename => 'order_pipe',
-	credential_name => dbms_pipe.get_credential_name,
-	location_uri => dbms_pipe.get_location_uri);
-     
-  if l_result = 0 then
-	dbms_output.put_line('dbms_pipe sent order successfully');
-  end if;
-end;
-/
+-- Search for DATA anywhere in the document:
+select p.DATA.PONumber.string()
+    , p.DATA.Reference.string() 
+    , p.DATA.LineItems[0].Part.Description.string()
+from   purchase_order_collection p
+where  json_textcontains ( DATA, '$', 'Princess' );
 
--- retrieve message on remote skwndb.  Rather than insert into a table we'll just view the output in SQLDeveloper.
-set serveroutput on
+-- just be exact match..this does not work
+select p.DATA.PONumber.string()
+    , p.DATA.Reference.string() 
+    , p.DATA.LineItems[0].Part.Description.string()
+from   purchase_order_collection p
+where  json_textcontains ( DATA, '$', 'Princes' );
 
-DECLARE
-  message1 integer;
-  message2 integer;
-  message3 varchar2(30);
-  message4 integer;
-  message5 integer;
-  message6 integer;
-  message7 number(9,2);
-  message8 varchar2(1);
-  message9 varchar2(4000);
-  message10 varchar2(4000);
-  message11 varchar2(4000);
-  l_result integer;
-BEGIN
-  dbms_pipe.set_credential_name('oci_cred');
-  dbms_pipe.set_location_uri('<object storage bucket URL>/'); 
-  l_result := dbms_pipe.receive_message (
-	pipename => 'order_pipe',
-	timeout  => dbms_pipe.maxwait,
-	credential_name => dbms_pipe.get_credential_name,
-	location_uri => dbms_pipe.get_location_uri);
-  IF l_result = 0 THEN
-	dbms_pipe.unpack_message(message1);
-        dbms_pipe.unpack_message(message2);
-        dbms_pipe.unpack_message(message3);
-        dbms_pipe.unpack_message(message4);
-        dbms_pipe.unpack_message(message5);
-        dbms_pipe.unpack_message(message6);
-        dbms_pipe.unpack_message(message7);
-        dbms_pipe.unpack_message(message8);
-	dbms_pipe.unpack_message(message9);
-	dbms_pipe.unpack_message(message10);
-	dbms_pipe.unpack_message(message11);
-        DBMS_OUTPUT.put_line('prod_id: ' || message1);
-        DBMS_OUTPUT.put_line('cust_id: ' || message2);
-        DBMS_OUTPUT.put_line('time_id: ' || message3);
-        DBMS_OUTPUT.put_line('channel_id: ' || message4);
-        DBMS_OUTPUT.put_line('promo_id: ' || message5);
-        DBMS_OUTPUT.put_line('quantity sold: ' || message6);
-        DBMS_OUTPUT.put_line('amount sold: ' || message7);
-        DBMS_OUTPUT.put_line('gender: ' || message8);
-        DBMS_OUTPUT.put_line('city: ' || message9);
-        DBMS_OUTPUT.put_line('state: ' || message10);
-        DBMS_OUTPUT.put_line('income level: ' || message11);
-    END IF;
-END;
-/
+-- run explain plan on this - see index above
+select p.DATA.PONumber.string(), p.DATA.Reference.string()
+from purchase_order_collection p
+where p.DATA.Requestor.string() = 'Martha Sullivan'
+</copy>
+```
 
+## **Data Insert**
+
+```
+<copy>
+insert into purchase_order_collection 
+values (
+    '1', 
+    sysdate,
+    sysdate,
+    '1',
+  utl_raw.cast_to_raw ( '{
+  "PONumber": 999,
+  "Reference": "Ref123",
+  "Requestor": "Derrick Cameron",
+  "CostCenter": "A999"
+}' )
+);
+commit;
+
+select p.id, JSON_Serialize(DATA returning varchar2 pretty) jsondata from purchase_order_collection p;
+</copy>
+```
+
+## **Data Updates**
+
+```
+<copy>
+-- one way to update docs..but limited..use json_transform below.
+
+update purchase_order_collection p
+set    DATA = json_mergepatch ( 
+         DATA, '{"CostCenter" : "A49"}'
+         )
+where  p.DATA."PONumber".string() = 1;
+commit;
+
+-- json_transform
+update purchase_order_collection p
+set DATA = json_transform(DATA,
+               SET '$.ShippingInstructions.Address' =
+                   '{"street":"My Street",
+                     "city":"Ridgefield",
+                     "state":"WA"}'
+                   FORMAT JSON
+                   IGNORE ON MISSING)
+where  p.DATA."PONumber".string() = 1;
+commit;
+
+select p.id, JSON_Serialize(DATA returning varchar2 pretty) jsondata from purchase_order_collection p;
+
+Use JSON Transform or JSON Merge Patch To Update a JSON Document
 </copy>
 
 ```
 
+## **Dataguide**
+
+```
+<copy>
+create table purchase_order_dataguide (dg_val CLOB, check (dg_val is JSON));
+
+-- load json structure into dataguide table
+insert into purchase_order_dataguide (dg_val)
+select JSON_DATAguide(DATA, dbms_json.FORMAT_HIERARCHICAL)
+from purchase_order_collection;
+commit;
+
+-- create query view using metadata in dataguide
+declare
+    dg clob;
+BEGIN
+    select dg_val into dg from purchase_order_dataguide;
+    dbms_json.create_view('purchase_order_view', 'purchase_order_collection', 'DATA', dg, resolveNameConflicts => true);
+END;
+/
+
+-- Generated PO View
+
+  CREATE OR REPLACE FORCE EDITIONABLE VIEW "JSON"."PURCHASE_ORDER_VIEW" ("CREATED_ON", "ID", "LAST_MODIFIED", "VERSION", "User", "PONumber", "Reference", "Requestor", "CostCenter", "name", "city", "state", "county", "street", "country", "zipCode", "postcode", "Special Instructions", "UPCCode", "UnitPrice", "Description", "Quantity", "ItemNumber", "type", "number") DEFAULT COLLATION "USING_NLS_COMP"  AS 
+  SELECT RT."CREATED_ON",RT."ID",RT."LAST_MODIFIED",RT."VERSION",JT."User",JT."PONumber",JT."Reference",JT."Requestor",JT."CostCenter",JT."name",JT."city",JT."state",JT."county",JT."street",JT."country",JT."zipCode",JT."postcode",JT."Special Instructions",JT."UPCCode",JT."UnitPrice",JT."Description",JT."Quantity",JT."ItemNumber",JT."type",JT."number"
+FROM "JSON"."PURCHASE_ORDER_COLLECTION" RT,
+JSON_TABLE("DATA", '$[*]' COLUMNS 
+"User" varchar2(8) path '$.User',
+"PONumber" number path '$.PONumber',
+ NESTED PATH '$.LineItems[*]' COLUMNS (
+"UPCCode" number path '$.Part.UPCCode',
+"UnitPrice" number path '$.Part.UnitPrice',
+"Description" varchar2(128) path '$.Part.Description',
+"Quantity" number path '$.Quantity',
+"ItemNumber" number path '$.ItemNumber'),
+"Reference" varchar2(32) path '$.Reference',
+"Requestor" varchar2(32) path '$.Requestor',
+"CostCenter" varchar2(4) path '$.CostCenter',
+"name" varchar2(32) path '$.ShippingInstructions.name',
+ NESTED PATH '$.ShippingInstructions.Phone[*]' COLUMNS (
+"type" varchar2(8) path '$.type',
+"number" varchar2(16) path '$.number'),
+"city" varchar2(32) path '$.ShippingInstructions.Address.city',
+"state" varchar2(2) path '$.ShippingInstructions.Address.state',
+"county" varchar2(8) path '$.ShippingInstructions.Address.county',
+"street" varchar2(64) path '$.ShippingInstructions.Address.street',
+"country" varchar2(32) path '$.ShippingInstructions.Address.country',
+"zipCode" number path '$.ShippingInstructions.Address.zipCode',
+"postcode" varchar2(8) path '$.ShippingInstructions.Address.postcode',
+"Special Instructions" varchar2(32) path '$."Special Instructions"')JT;
+
+-- update column headers:
+create or replace view purchase_order_view2 as
+SELECT 
+    --RT."CREATED_ON"
+    --,RT."ID"
+    --,RT."LAST_MODIFIED"
+    --,RT."VERSION"
+    JT."PONumber" ponumber
+    ,JT."Reference" reference
+    ,JT."Requestor" requestor
+    ,JT."User" Userid
+    ,JT."CostCenter" costcenter
+    ,JT."name" name
+    ,JT."street" street
+    ,JT."city" city
+    ,JT."state" state
+    ,JT."county" county
+    ,JT."country" country
+    ,JT."zipCode" zipcode
+    ,JT."postcode" postalcode
+    ,JT."Special Instructions" special_instructions
+    ,JT."ItemNumber" itemnumber
+    ,JT."Description" part_description
+    ,JT."UnitPrice" part_unitprice
+    ,JT."UPCCode" part_upccode
+    ,JT."Quantity" item_quantity
+    ,JT."type" phone_type
+    ,JT."number" phone_number
+FROM "PURCHASE_ORDER_COLLECTION" RT,
+JSON_TABLE("DATA", '$[*]' COLUMNS 
+"User" varchar2(8) path '$.User',
+"PONumber" number path '$.PONumber',
+ NESTED PATH '$.LineItems[*]' COLUMNS (
+"UPCCode" number path '$.Part.UPCCode',
+"UnitPrice" number path '$.Part.UnitPrice',
+"Description" varchar2(128) path '$.Part.Description',
+"Quantity" number path '$.Quantity',
+"ItemNumber" number path '$.ItemNumber'),
+"Reference" varchar2(32) path '$.Reference',
+"Requestor" varchar2(32) path '$.Requestor',
+"CostCenter" varchar2(4) path '$.CostCenter',
+"name" varchar2(32) path '$.ShippingInstructions.name',
+ NESTED PATH '$.ShippingInstructions.Phone[*]' COLUMNS (
+"type" varchar2(8) path '$.type',
+"number" varchar2(16) path '$.number'),
+"city" varchar2(32) path '$.ShippingInstructions.Address.city',
+"state" varchar2(2) path '$.ShippingInstructions.Address.state',
+"county" varchar2(8) path '$.ShippingInstructions.Address.county',
+"street" varchar2(64) path '$.ShippingInstructions.Address.street',
+"country" varchar2(32) path '$.ShippingInstructions.Address.country',
+"zipCode" number path '$.ShippingInstructions.Address.zipCode',
+"postcode" varchar2(8) path '$.ShippingInstructions.Address.postcode',
+"Special Instructions" varchar2(32) path '$."Special Instructions"')JT;
+
+select * from purchase_order_view2
+
+-- query view, returns 6 rows
+ponumber = 1
+
+-- create view on path at root level
+-- "DATA$PONumber"=1
+declare
+    dg clob;
+BEGIN
+    select dg_val into dg from purchase_order_dataguide;
+    dbms_json.create_view_on_path('purchase_order_view3', 'purchase_order_collection', 'DATA', '$');
+END;
+/
+
+declare
+    dg clob;
+BEGIN
+    select dg_val into dg from purchase_order_dataguide;
+    dbms_json.create_view_on_path('purchase_order_view4', 'purchase_order_collection', 'DATA', '$.Reference');
+END;
+/
+
+-- path now Reference - returns 5 rows
+declare
+    dg clob;
+BEGIN
+    select dg_val into dg from purchase_order_DATAguide;
+    dbms_json.create_view_on_path('purchase_order_view5', 'purchase_order_collection', 'DATA', '$.LineItems');
+END;
+/
+
+-- query view, returns 5 row
+"DATA$PONumber"=1
+
+-- get view sql without creating view:
+create table purchase_order_get_sql(viewtext clob);
+
+insert into purchase_order_get_sql(viewtext) 
+select dbms_json.get_view_sql(
+  'PURCHASE_ORDER_VIEW3'
+  , 'PURCHASE_ORDER_COLLECTION'
+  , 'DATA'
+  , dbms_json.get_index_DATAguide('PURCHASE_ORDER_COLLECTION', 'DATA', dbms_json.format_hierarchical, DBMS_JSON.PRETTY)
+  ) 
+from dual;
+commit;
+
+-- get DATAguide
+insert into purchase_order_get_sql(viewtext) 
+SELECT DBMS_JSON.GET_INDEX_DATAGUIDE(
+  'PURCHASE_ORDER_COLLECTION'
+  , 'DATA'
+  , DBMS_JSON.FORMAT_HIERARCHICAL
+  , DBMS_JSON.PRETTY)
+FROM DUAL;
+commit;
+</copy>
+
+```
+
+## **Create External Table**
+
+```
+<copy>
+-- do NOT use column named 'DATA' -- bug???
+BEGIN
+  DBMS_CLOUD.CREATE_EXTERNAL_TABLE (
+   table_name =>'purchase_order_ext',
+   credential_name =>'API_TOKEN',
+   file_uri_list =>'https://objectstorage.us-ashburn-1.oraclecloud.com/n/natdcshjumpstartprod/b/json/o/POList.json',
+   column_list => 'json_document blob',
+   field_list => 'json_document char(5000)'
+);
+END;
+/
+  
+SELECT JSON_VALUE(json_document,'$.PONumber') as ponumber,
+    JSON_VALUE(json_document,'$.Reference') as reference,
+    JSON_VALUE(json_document,'$.Requestor') as requestor,
+    JSON_VALUE(json_document,'$.User') as userid,
+    JSON_VALUE(json_document,'$.CostCenter') as costcenter,
+    JSON_VALUE(json_document,'$.ShippingInstructions.name') as shipping_name,
+    JSON_VALUE(json_document,'$.ShippingInstructions.Address.street') as shipping_address_street,
+    JSON_VALUE(json_document,'$.ShippingInstructions.Address.city') as shipping_address_city,
+    JSON_VALUE(json_document,'$.ShippingInstructions.Address.zipCode') as shipping_address_zip,
+    JSON_VALUE(json_document,'$.ShippingInstructions.Phone.type') as shipping_phone_type,
+    JSON_VALUE(json_document,'$.ShippingInstructions.Phone.number') as shipping_phone_number,
+    JSON_VALUE(json_document,'$."Special Instructions"') as specialinstructions,
+    json_query(json_document,'$.LineItems.ItemNumber' WITH WRAPPER) as itemnumber,
+    json_query(json_document,'$.LineItems.Part.UnitPrice' WITH WRAPPER) as unitprices,
+    json_query(json_document,'$.LineItems[0].Part.Description' WITH WRAPPER) lineitem1_part_description,
+    json_query(json_document,'$.LineItems.Part.Description' WITH WRAPPER) part_descriptions
+FROM purchase_order_ext
+
+BEGIN
+  DBMS_CLOUD.VALIDATE_EXTERNAL_TABLE (
+    table_name => 'PURCHASE_ORDER_EXT' );
+END;
+/
+</copy>
+
+```
+
+## **Format Relational to JSON**
+
+```
+<copy>
+select JSON_Object(*) from products;
+
+-- write out relational table to json file in object storage..simple but likely not what you want.
+BEGIN
+  DBMS_CLOUD.EXPORT_DATA(
+    credential_name => 'API_TOKEN',
+    file_uri_list   => 'https://objectstorage.us-ashburn-1.oraclecloud.com/n/natdcshjumpstartprod/b/json/o/purchase_order_view.json',
+    query           => 'SELECT * FROM purchase_order_view',
+    format          => JSON_OBJECT('type' value 'json')    
+    );
+END;
+/
+
+select json_object ( * ) jdoc from purchase_order_view
+
+-- build json for initial root level value pairs - returns five rows for each PO
+select 
+json_object (
+  'PONumber' value p.ponumber,
+  'Requestor' value p.requestor,
+  'ShippingInstructions' value json_object (
+        'name' value p.name,
+        'Address' value json_object (
+            'Street' value p.street,
+            'City' value p.city,
+            'State' value p.state,
+            'ZipCode' value p.zipcode,
+            'country' value p.country),
+        'Phone' value json_array (
+            json_object(
+                'type' value p.phone_type,
+                'number' value p.phone_number)
+                )
+            )
+        )
+from purchase_order_view2 p
+
+-- build json off view that is distinct - returns one row for every PO.
+select json_object (
+  'PONumber' value p.ponumber,
+  'Requestor' value p.requestor,
+  'ShippingInstructions' value json_object (
+        'name' value p.name,
+        'Address' value json_object (
+            'Street' value p.street,
+            'City' value p.city,
+            'State' value p.state,
+            'ZipCode' value p.zipcode,
+            'country' value p.country),
+        'Phone' value json_array (
+            json_object (
+            'type' value p.phone_type,
+            'number' value p.phone_number))
+        ),
+    'Special Instructions' value p.special_instructions) string1
+from (select distinct 
+    ponumber
+    , reference
+    , requestor
+    , userid
+    , costcenter
+    , name
+    , street
+    , city
+    , state
+    , county
+    , country
+    , zipcode
+    , special_instructions
+    , phone_type
+    , phone_number
+from    purchase_order_view2) p
+where p.phone_number is not null;
+
+-- list arrays for each PO (one line per PO)
+select json_object (
+    'LineItems' value json_arrayagg (
+    json_object(
+        'ItemNumber' value p.itemnumber,
+        'Part' value json_object (
+            'Description' value p.part_description,
+            'UnitPrice' value p.part_unitprice,
+            'UPCCode' value p.part_upccode),
+        'Quantity' value p.item_quantity)
+                )
+            )
+from purchase_order_view2 p
+group by p.ponumber
+
+-- create view with two strings - 1 for root level and another for arrays.
+Create or replace view purchase_order_reltojson1 as
+select p1.ponumber, p1.string1, p2.string2 from
+----------------------------
+(select p.ponumber,
+   json_object (
+  'PONumber' value p.ponumber,
+  'Requestor' value p.requestor,
+  'ShippingInstructions' value json_object (
+        'name' value p.name,
+        'Address' value json_object (
+            'Street' value p.street,
+            'City' value p.city,
+            'State' value p.state,
+            'ZipCode' value p.zipcode,
+            'country' value p.country),
+        'Phone' value json_array (
+            json_object (
+            'type' value p.phone_type,
+            'number' value p.phone_number))
+        ),
+    'Special Instructions' value p.special_instructions) string1
+from (select distinct 
+    ponumber
+    , reference
+    , requestor
+    , userid
+    , costcenter
+    , name
+    , street
+    , city
+    , state
+    , county
+    , country
+    , zipcode
+    , special_instructions
+    , phone_type
+    , phone_number
+from    purchase_order_view2) p
+where p.phone_number is not null) p1,
+----------------------------
+(select p.ponumber
+    , json_object (
+    'LineItems' value json_arrayagg (
+    json_object(
+        'ItemNumber' value p.itemnumber,
+        'Part' value json_object (
+            'Description' value p.part_description,
+            'UnitPrice' value p.part_unitprice,
+            'UPCCode' value p.part_upccode),
+        'Quantity' value p.item_quantity)
+                )
+            ) string2
+from purchase_order_view2 p
+group by p.ponumber) p2
+----------------------------
+where p1.ponumber = p2.ponumber
+
+create or replace view purchase_order_reltojson2 as
+select substr(string1,1,to_number(length(string1)-1))||','||ltrim(string2,'{') myjson
+from purchase_order_reltojson1
+
+</copy>
+
+```
