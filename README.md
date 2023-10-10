@@ -70,6 +70,8 @@ SELECT
 
 ## **Loading Data**
 
+```
+<copy>
 -- add credential in json user - can't seem to grant api_token created by admin
 BEGIN
   DBMS_CLOUD.CREATE_CREDENTIAL(
