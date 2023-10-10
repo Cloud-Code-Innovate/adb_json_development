@@ -1,0 +1,16 @@
+{
+    "workshoptitle": "Oracle Autonomous Database Features for Supporting Application Development Across Cloud Services",
+    "help": "",
+    "include": {
+        "import": "../../common/import_notebook.md"
+    },
+    "tutorials": [
+        {         
+            "title": "Oracle Autonomous Database Features for Supporting Application Development Across Cloud Services",
+            "description": "Explore the ways in which applications in ADB can interact and exchange data with other cloud services",
+            "publisheddate": "7/12/2023",
+            "filename": "README.md"
+        }
+
+    ]
+}
