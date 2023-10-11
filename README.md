@@ -89,7 +89,7 @@ BEGIN
   DBMS_CLOUD.COPY_COLLECTION(    
     collection_name => 'purchase_order_collection',    
     credential_name => 'API_TOKEN',    
-    file_uri_list => 'https://objectstorage.us-ashburn-1.oraclecloud.com/n/natdcshjumpstartprod/b/json/o/POList.json',
+    file_uri_list => 'https://objectstorage.us-ashburn-1.oraclecloud.com/n/<namespace>/b/json/o/POList.json',
     format => '{"recorddelimiter" : "0x''01''", "unpackarrays" : "TRUE", "maxdocsize" : "10240000"}'
   );
 END;
@@ -365,7 +365,7 @@ BEGIN
   DBMS_CLOUD.CREATE_EXTERNAL_TABLE (
    table_name =>'purchase_order_ext',
    credential_name =>'API_TOKEN',
-   file_uri_list =>'https://objectstorage.us-ashburn-1.oraclecloud.com/n/natdcshjumpstartprod/b/json/o/POList.json',
+   file_uri_list =>'https://objectstorage.us-ashburn-1.oraclecloud.com/n/<namespace>/b/json/o/POList.json',
    column_list => 'json_document blob',
    field_list => 'json_document char(5000)'
 );
@@ -409,7 +409,7 @@ select JSON_Object(*) from products;
 BEGIN
   DBMS_CLOUD.EXPORT_DATA(
     credential_name => 'API_TOKEN',
-    file_uri_list   => 'https://objectstorage.us-ashburn-1.oraclecloud.com/n/natdcshjumpstartprod/b/json/o/purchase_order_view.json',
+    file_uri_list   => 'https://objectstorage.us-ashburn-1.oraclecloud.com/n/<namespace>/b/json/o/purchase_order_view.json',
     query           => 'SELECT * FROM purchase_order_view',
     format          => JSON_OBJECT('type' value 'json')    
     );
