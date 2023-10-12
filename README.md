@@ -5,7 +5,7 @@ October, 2023
 
 ## **Useful Reference Links**
 
-[About About SODA (Simple Oracle Document access)](https://docs.oracle.com/en/DATAbase/oracle/simple-oracle-document-access/adsdi/overview-soda.html#GUID-BE42F8D3-B86B-43B4-B2A3-5760A4DF79FB)
+[About About SODA (Simple Oracle Document access)](https://docs.oracle.com/en/DATAbase/oracle/simple-oracle-document-access/adsdi/overview-soda.html)
 
 [Excellent blog about JSON, many good examples](https://blogs.oracle.com/sql/post/how-to-store-query-and-create-json-documents-in-oracle-database)
 
