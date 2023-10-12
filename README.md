@@ -3,6 +3,17 @@
 Derrick Cameron, Wilson Randle
 October, 2023
 
+## **Useful Reference Links**
+
+[About About SODA (Simple Oracle Document access)](https://docs.oracle.com/en/DATAbase/oracle/simple-oracle-document-access/adsdi/overview-soda.html#GUID-BE42F8D3-B86B-43B4-B2A3-5760A4DF79FB)
+
+[Excellent blog about JSON, many good examples](https://blogs.oracle.com/sql/post/how-to-store-query-and-create-json-documents-in-oracle-database)
+
+[Useful live lab](https://apexapps.oracle.com/pls/apex/r/dbpm/livelabs/run-workshop?p210_wid=831&p210_wec=)
+
+[That Jeff smith presentation on new 21c features in Database actions](https://www.youtube.com/watch?v=2aqI9eSmjMQ)
+
+[SODA for PL/SQL API](https://oracle-base.com/articles/18c/soda-for-plsql-18c)
 
 ## **SQL Queries** 
 
